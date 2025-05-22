@@ -1,0 +1,120 @@
+import os
+import sys
+import shutil
+import mutagen
+from tkinter import Tk, filedialog
+from pydub import AudioSegment
+import ffmpeg
+import re
+
+def is_mp3(file):
+    return file.lower().endswith(".mp3")
+
+def atoi(text):
+    return int(text) if text.isdigit() else text
+
+def natural_keys(text):
+    return [atoi(c) for c in re.split(r'(\d+)', text)]
+
+def transcode_to_mp3(input_path, output_path, bitrate="80k"):
+    stream = ffmpeg.input(input_path)
+    stream = ffmpeg.output(
+        stream,
+        output_path,
+        audio_bitrate=bitrate,
+        acodec="libmp3lame",
+        ar=44100
+    )
+    ffmpeg.run(stream, overwrite_output=True, quiet=True)
+
+def get_metadata_and_cover(mp3_path):
+    from mutagen.mp3 import MP3
+    from mutagen.id3 import ID3, APIC, error
+
+    meta = {}
+    cover = None
+    try:
+        audio = MP3(mp3_path, ID3=ID3)
+        meta['tags'] = dict(audio.tags)
+        for tag in audio.tags.values():
+            if tag.FrameID == 'APIC':
+                cover = tag.data
+                meta['cover_mime'] = tag.mime
+                break
+    except Exception:
+        pass
+    return meta, cover
+
+def save_cover_to_mp3(mp3_path, cover_data, mime_type):
+    from mutagen.mp3 import MP3
+    from mutagen.id3 import ID3, APIC, error
+    audio = MP3(mp3_path, ID3=ID3)
+    try:
+        audio.tags.add(
+            APIC(
+                encoding=3,
+                mime=mime_type,
+                type=3,
+                desc='Cover',
+                data=cover_data
+            )
+        )
+        audio.save()
+    except Exception:
+        pass
+
+def merge_mp3s(mp3_files, temp_dir):
+    converted = []
+    for i, mp3 in enumerate(mp3_files):
+        temp_mp3 = os.path.join(temp_dir, f"part_{i}.mp3")
+        transcode_to_mp3(mp3, temp_mp3)
+        converted.append(temp_mp3)
+
+    concat_list_path = os.path.join(temp_dir, "concat.txt")
+
+    with open(concat_list_path, "w", encoding="utf-8") as f:
+        for c in converted:
+            f.write(f"file '{c}'\n")
+
+    output_path = os.path.join(temp_dir, "merged.mp3")
+    (
+        ffmpeg
+        .input(concat_list_path, format="concat", safe=0)
+        .output(output_path, acodec="copy")
+        .run(overwrite_output=True, quiet=True)
+    )
+    return output_path
+
+def main():
+    Tk().withdraw()
+    folder = filedialog.askdirectory(title="Ordner mit den Teilen auswählen")
+    if not folder:
+        print("zu dumm für ordnerauswahl")
+        sys.exit(1)
+
+    file_list = [f for f in os.listdir(folder) if is_mp3(f)]
+    mp3_files = [os.path.join(folder, f) for f in sorted(file_list, key=natural_keys)]
+
+    if not mp3_files:
+        print("falschen ordner ausgewöhlr du hohlkopf")
+        sys.exit(1)
+
+    meta, cover = get_metadata_and_cover(mp3_files[0])
+    mime_type = meta.get('cover_mime', "image/jpeg")
+
+    from tempfile import TemporaryDirectory
+
+    with TemporaryDirectory() as temp_dir:
+        merged_mp3_path = merge_mp3s(mp3_files, temp_dir)
+
+        parent_dir = os.path.dirname(folder)
+        folder_name = os.path.basename(folder.rstrip("/\\"))
+        output_mp3 = os.path.join(parent_dir, f"{folder_name}.mp3")
+        shutil.copy(merged_mp3_path, output_mp3)
+
+        if cover:
+            save_cover_to_mp3(output_mp3, cover, mime_type)
+        print(f"simgaerfolg: {output_mp3}")
+
+if __name__ == "__main__":
+    main()
