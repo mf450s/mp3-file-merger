@@ -109,7 +109,15 @@ def main():
 
         parent_dir = os.path.dirname(folder)
         folder_name = os.path.basename(folder.rstrip("/\\"))
-        output_mp3 = os.path.join(parent_dir, f"{folder_name}.mp3")
+        match = re.match(r"Folge\s*(\d+)\s*[:：]\s*(.+)", folder_name)
+        if match:
+            nummer = match.group(1)
+            titel = match.group(2)
+            new_filename = f"{nummer}／{titel}.mp3"
+        else:
+            new_filename = f"{folder_name}.mp3"
+
+        output_mp3 = os.path.join(parent_dir, new_filename)
         shutil.copy(merged_mp3_path, output_mp3)
 
         if cover:
